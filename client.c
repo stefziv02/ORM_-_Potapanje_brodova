@@ -8,9 +8,9 @@
 #include <stdlib.h>
 #include <termios.h>   //za input sa terminala
 #include <unistd.h>
+#include <signal.h>
 
-#define DEFAULT_BUFLEN 512
-#define DEFAULT_PORT   27015
+#define DEFAULT_PORT   30000
 
 int validanUnos;
 int mestoPolja;
@@ -24,26 +24,17 @@ unsigned char protivnikovaPolja[9];
 unsigned char dobijeniKarakterProtivnikovogPolja;
 char unos[2];
 
-void delay(int number_of_seconds)
-{
-    // Converting time into milli_seconds
-    int milli_seconds = 1000 * number_of_seconds;
- 
-    // Storing start time
-    clock_t start_time = clock();
- 
-    // looping till required time is not achieved
-    while (clock() < start_time + milli_seconds);
-}
-
-void whileProveraValidnostiUnosa(){
-    while(1){//proverava se validnost, dokle god se ne unese polje dobrog formata xy (x=A,B,C ; y=1,2,3)
-        scanf("%s", unos);
-        if(proveraValidnostiUnosa() == -1){ //provera validnosti
-            printf("NEVALIDAN UNOS! PROBAJ PONOVO: \n");
-            continue;
-        }
-        break;
+void izracunajMestoPolja(){ //nakon pravilnog unosa ovo vraca kom mestu u mojaPolja nizu pripada polje
+    mestoPolja = 0;
+    if(unos[0] == 'B'){//mesto polja A1 je 0,0
+        mestoPolja += 1;
+    } else if(unos[0] == 'C'){
+        mestoPolja += 2;
+    }
+    if(unos[1] == '2'){
+        mestoPolja += 3;
+    } else if(unos[1] == '3'){
+        mestoPolja += 6;
     }
 }
 
@@ -59,6 +50,17 @@ int proveraValidnostiUnosa(){ //1 ako validan unos, -1 ako nije
         izracunajMestoPolja();
     }
     return validanUnos;
+}
+
+void whileProveraValidnostiUnosa(){
+    while(1){//proverava se validnost, dokle god se ne unese polje dobrog formata xy (x=A,B,C ; y=1,2,3)
+        scanf("%s", unos);
+        if(proveraValidnostiUnosa() == -1){ //provera validnosti
+            printf("NEVALIDAN UNOS! PROBAJ PONOVO: \n");
+            continue;
+        }
+        break;
+    }
 }
 
 void ispisTabele(){
@@ -85,31 +87,6 @@ void ispisTabeleProtivnika(){
     printf(" -------\n\n");
 }
 
-void izracunajMestoPolja(){ //nakon pravilnog unosa ovo vraca kom mestu u mojaPolja nizu pripada polje
-    mestoPolja = 0;
-    if(unos[0] == 'B'){//mesto polja A1 je 0,0
-        mestoPolja += 1;
-    } else if(unos[0] == 'C'){
-        mestoPolja += 2;
-    }
-    if(unos[1] == '2'){
-        mestoPolja += 3;
-    } else if(unos[1] == '3'){
-        mestoPolja += 6;
-    }
-}
-
-void whileDaLiJeZauzetoPolje(){
-    while(1){
-        whileProveraValidnostiUnosa();
-        if(daLiJeZauzetoPolje() == 1){
-            printf("\nPOLJE VEC ZAUZETO. PROBAJ OPET:");
-            continue;
-        }
-        break;
-    }
-}
-
 int daLiJeZauzetoPolje(){ //ako -1 nije zauzeto, ako 1 jeste zauzeto
     zauzetoPolje = -1;
     if(mojaPolja[mestoPolja] == 'X' || mojaPolja[mestoPolja] == 'Y'){ //ako da, polje je vec zauzeto
@@ -118,11 +95,11 @@ int daLiJeZauzetoPolje(){ //ako -1 nije zauzeto, ako 1 jeste zauzeto
     return zauzetoPolje;
 }
 
-void whileDaLiJeSusednoOdY(){
+void whileDaLiJeZauzetoPolje(){
     while(1){
-        whileDaLiJeZauzetoPolje();
-        if(daLiJeSusednoOdY() == -1){
-            printf("\nUNETO POLJE NIJE SUSEDNO PRVOM DELU. PROBAJ OPET:");
+        whileProveraValidnostiUnosa();
+        if(daLiJeZauzetoPolje() == 1){
+            printf("\nPOLJE VEC ZAUZETO. PROBAJ OPET:");
             continue;
         }
         break;
@@ -153,13 +130,34 @@ int daLiJeSusednoOdY(){ //-1 nije susedno, 1 susedno je
     return susednoJe;
 }
 
+void whileDaLiJeSusednoOdY(){
+    while(1){
+        whileDaLiJeZauzetoPolje();
+        if(daLiJeSusednoOdY() == -1){
+            printf("\nUNETO POLJE NIJE SUSEDNO PRVOM DELU. PROBAJ OPET:");
+            continue;
+        }
+        break;
+    }
+}
+
+volatile sig_atomic_t received_signal = 0;
+
+// Handler za signal koji će klijent primiti
+void handle_signal(int sig) {
+    if (sig == SIGUSR1) {
+        received_signal = 1;
+    } else if(sig == SIGUSR2){
+        received_signal = 2;
+    }
+}
+
 int main(int argc , char *argv[])
 {
-    /*
+    ////1. INICIJALIZACIJA////
+
     int sock;
     struct sockaddr_in server;
-    char *message = "this is a test";
-
     //Create socket
     sock = socket(AF_INET , SOCK_STREAM , 0);
     if (sock == -1)
@@ -172,41 +170,40 @@ int main(int argc , char *argv[])
     server.sin_family = AF_INET;
     server.sin_port = htons(DEFAULT_PORT);
 
-    //Connect to remote server
+    printf("POVEZUJEM SE SA SERVEROM...\n"); //povezivanje
     if (connect(sock , (struct sockaddr *)&server , sizeof(server)) < 0)
     {
         perror("connect failed. Error");
         return 1;
     }
-
-    puts("Connected\n");
-
-    //Send some data
-    if( send(sock , message , strlen(message), 0) < 0)
-    {
-        puts("Send failed");
-        return 1;
-    }
-
-    puts("Client message:");
-    puts(message);
-
-    close(sock);
-    */
-
-    ////1. INICIJALIZACIJA////
-    printf("POVEZUJEM SE SA SERVEROM...\n"); //povezivanje
     printf("USPESNO POVEZAN.\n");
     //i prima informaciju koji je igrac po redu 1 - prvi, 2 - drugi i smesta u idIgraca
+    if(recv(sock , &idIgraca , sizeof(idIgraca) , 0) < 0){
+        puts("Receive id error.");
+        return 1;
+    }
     printf("JA SAM IGRAC %d\n", idIgraca);
-
     printf("CEKAM DA SVI BUDU SPREMNI\n"); //cekanje na signal
 
-    //klijent prima signal da su oba igraca spremna
+    pid_t klijent_pid = getpid();
+    if (send(sock, &klijent_pid, sizeof(pid_t), 0) == -1) {
+        perror("Greška pri slanju PID-a klijentu");
+        exit(EXIT_FAILURE);
+    }
+
+    if (signal(SIGUSR1, handle_signal) == SIG_ERR) {
+        perror("Greška pri postavljanju rukovaoca za signal");
+        exit(EXIT_FAILURE);
+    }
+
+    // Čekanje na signal od servera
+    while (received_signal != 1) {//klijent prima signal da su oba igraca spremna 
+        sleep(1); 
+    }
+    received_signal = 0; 
     printf("POCINJE IGRA.\n");
 
     ////2. BIRANJE POLJA////
-    delay(1000); //temporary
 
     for(int i = 0;i < 9;i++){ //postavljanje promenjivih na prazna polja
         mojaPolja[i] = ' ';
@@ -214,39 +211,60 @@ int main(int argc , char *argv[])
     }
 
     //1x1
-    system("clear"); //brise se sve sa terminala
+    printf("\e[1;1H\e[2J"); //brise se sve sa terminala
     ispisTabele();
     printf("IGRACU %d, IZABERI POLJE ZA BROD 1x1: ", idIgraca);
     whileProveraValidnostiUnosa();
     mojaPolja[mestoPolja] = 'X'; //X je 1x1 brod
 
     //uspesno unet 1x1, unosim prvi deo 2x1 broda
-    system("clear"); //brise se sve sa terminala
+    printf("\e[1;1H\e[2J"); //brise se sve sa terminala
     ispisTabele();
     printf("IZABERI PRVO POLJE ZA BROD 2x1: ");
     whileDaLiJeZauzetoPolje();
     mojaPolja[mestoPolja] = 'Y'; //Y je 2x1 brod, treba da budu 2 y
 
     //uspesno unet prvi deo 2x1 broda, unosim drugi deo 2x2 broda
-    system("clear"); //brise se sve sa terminala
+    printf("\e[1;1H\e[2J"); //brise se sve sa terminala
     ispisTabele();
     printf("IZABERI DRUGO POLJE ZA BROD 2x1: ");
     whileDaLiJeSusednoOdY();
     mojaPolja[mestoPolja] = 'Y';
+    printf("\e[1;1H\e[2J"); //brise se sve sa terminala
+    ispisTabele();
 
     //Klijent ovde salje vrednosti polja serveru
-    printf("SALJEM SERVERU POLJA...\n");
-    printf("USPESNO POSLATA POLJA SERVERU...\n");
+    printf("SALJEM SERVERU POLJA.\n");
+    for(int i = 0; i < 9; i++) {
+        if( send(sock, &mojaPolja[i], sizeof(mojaPolja[i]), 0) < 0)
+        {
+            puts("Send failed");
+            return 1;
+        }
+    }
+    printf("USPESNO POSLATA POLJA SERVERU.\n");
 
     ////3. POCINJE IGRA////
 
-    delay(2000); //temporary
-
     while(1){
-        printf("CEKAM SVOJ POTEZ\n");//klijent prima signal da je na redu, mora da ceka na signal
+        printf("CEKAM SVOJ POTEZ...\n");//klijent prima signal da je na redu, mora da ceka na signal
         //Prvi igrac ce prvi i nagadjati, drugi mora da ceka da prvi zavrsi potez
+        if (signal(SIGUSR1, handle_signal) == SIG_ERR || signal(SIGUSR2, handle_signal) == SIG_ERR) {
+            perror("Greška pri postavljanju rukovaoca za signal");
+            exit(EXIT_FAILURE);
+        }
+
+        // Čekanje na signal od servera
+        while (received_signal != 1 && received_signal != 2) {//ako je signal 1 igra se normalno nastavlja
+            sleep(1); 
+        }
+        if(received_signal == 2){//ako je signal 2 doslo je do prekida (gubitka)
+            printf("IZGUBIO SAM.\n");
+            break;
+        }
+        received_signal = 0;
         
-        system("clear"); //brise se sve sa terminala
+        printf("\e[1;1H\e[2J"); //brise se sve sa terminala
         printf("MOJA POLJA:\n"); 
         ispisTabele();
         printf("PROTIVNIKOVA POLJA:\n"); 
@@ -258,41 +276,64 @@ int main(int argc , char *argv[])
             //nakon sto unese pravilan unos proverava se da li je
             //to polje vec birano, ako jeste igrac gubi potez i pogadja drugi igrac
             printf("IZABRAO SAM BIRANO POLJE. SALJEM SERVERU DA SAM IZGUBIO RUNDU\n");
-            //klijent ovde salje serveru mestoPolja = -1
+            //klijent ovde salje serveru mestoPolja
+            mestoPolja = -1;
+            if( send(sock, &mestoPolja, sizeof(mestoPolja), 0) < 0)
+            {
+                puts("Send failed");
+                return 1;
+            }
             continue;
         }
 
         //klijent ovde salje serveru mestoPolja
         printf("SALJEM IZABRANO POLJE SERVERU\n");
-
-        printf("PRIMAM OD SERVERA VREDNOST IZABRANOG POLJA");//klijent prima polje protivnika na mestoPolja lokaciji: x y ili [space],
+        if( send(sock, &mestoPolja, sizeof(mestoPolja), 0) < 0)
+        {
+            puts("Send failed");
+            return 1;
+        }
+        printf("POSLAO SAM IZABRANO POLJE SERVERU\n");
+        printf("CEKAM OD SERVERA VREDNOST IZABRANOG POLJA\n");//klijent prima polje protivnika na mestoPolja lokaciji: x y ili [space],
         //i stavlja to u dobijeniKarakterProtivnikovogPolja
-
+        if(recv(sock , &dobijeniKarakterProtivnikovogPolja , sizeof(dobijeniKarakterProtivnikovogPolja) , 0) < 0){
+            puts("Receive dobijeniKarakterProtivnikovogPolja failure.");
+            return 1;
+        }
+ 
         if(dobijeniKarakterProtivnikovogPolja == 'X' || dobijeniKarakterProtivnikovogPolja == 'Y'){
             printf("BRAVO. POGODIO SI LOKACIJU BRODA.\n");
-        } else if(dobijeniKarakterProtivnikovogPolja == ' '){
+        } else { //dobijeniKarakterProtivnikovogPolja == ' '
+            printf("PROMASIO MESTO.\n");
             dobijeniKarakterProtivnikovogPolja = '-';//probao lokaciju, nije pogodio
         }
         protivnikovaPolja[mestoPolja] = dobijeniKarakterProtivnikovogPolja;
 
-        printf("DA LI JE KRAJ IGRE?");
+        printf("DA LI JE KRAJ IGRE?\n");
         //ovde klijent prima krajIgre
+        if(recv(sock , &krajIgre, sizeof(krajIgre) , 0) < 0){
+            printf("Receive krajIgre failure.");
+            return 1;
+        }
+        
         if(krajIgre == 0){
+            printf("NIJE KRAJ IGRE.\n");
             continue;
         } else if(krajIgre == idIgraca){ //ako se krajIgre poklapa sa brojem igraca onda je pobedio
-            printf("CESTITAM. POBEDILI STE");
+            printf("CESTITAM. POBEDILI STE.\n");
             break;
         } else {
-            printf("IZGUBILI STE");
+            printf("IZGUBILI STE.\n");
             break;
         }
-        delay(2000);//temporary
+        fflush(stdin);
     }
 
     ////4. KRAJ IGRE////
 
-    printf("KRAJ IGRE");
-    printf("KLIJENT SE GASI");
+    printf("KRAJ IGRE.\n");
+    printf("KLIJENT SE GASI.\n");
+    close(sock);
 
     return 0;
 }
